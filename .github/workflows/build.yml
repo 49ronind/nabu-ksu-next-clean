@@ -11,10 +11,18 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Install Dependencies & Setup Toolchain Symlinks
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 lld-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev bc patch curl
+          sudo apt-get install -y clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev bc patch curl
+          
+          # Create global shortcuts for the generic LLVM tools required by the kernel Makefile
+          sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/usr/bin/llvm-ar
+          sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
+          sudo ln -sf /usr/bin/llvm-nm-14 /usr/bin/llvm-nm
+          sudo ln -sf /usr/bin/llvm-objcopy-14 /usr/bin/llvm-objcopy
+          sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
+          sudo ln -sf /usr/bin/llvm-strip-14 /usr/bin/llvm-strip
 
       - name: Clone Mahiro Kernel (KernelSU Branch)
         run: |
@@ -23,9 +31,8 @@ jobs:
       - name: Inject KernelSU-Next (Legacy Branch)
         run: |
           cd kernel
-          # Remove any existing KSU driver remnants
           rm -rf drivers/kernelsu
-          # Use the official setup script to pull the latest legacy branch with full git history
+          # Dynamically setups the legacy framework with the full commit tree intact
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
 
       - name: Apply Claude's Manual Hooks Patch
@@ -36,7 +43,6 @@ jobs:
       - name: Generate Nabu Defconfig with KSU Flags
         run: |
           cd kernel
-          # Append KSU and Manual Hook requirements directly to the configuration
           echo "CONFIG_KSU=y" >> arch/arm64/configs/nabu_defconfig
           echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/nabu_defconfig
           
