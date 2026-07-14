@@ -16,8 +16,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev bc patch curl
           
-          # Create global shortcuts for the generic LLVM tools required by the kernel Makefile
-          sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/usr/bin/llvm-ar
+          # Fixed toolchain symlinks mapping (removed the typo line)
           sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
           sudo ln -sf /usr/bin/llvm-nm-14 /usr/bin/llvm-nm
           sudo ln -sf /usr/bin/llvm-objcopy-14 /usr/bin/llvm-objcopy
@@ -32,7 +31,7 @@ jobs:
         run: |
           cd kernel
           rm -rf drivers/kernelsu
-          # Dynamically setups the legacy framework with the full commit tree intact
+          # Automatically integrates the legacy framework with the full commit history
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
 
       - name: Apply Claude's Manual Hooks Patch
