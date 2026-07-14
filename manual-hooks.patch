@@ -18,13 +18,12 @@
  
 --- a/fs/read_write.c
 +++ b/fs/read_write.c
-@@ -580,2 +580,6 @@
- 	if (!(file->f_mode & FMODE_READ))
+@@ -440,2 +440,5 @@
+ 	if (!(file->f_mode & FMODE_CAN_READ))
 +#ifdef CONFIG_KSU
-+	extern int ksu_handle_sys_read(struct file *file, char __user *buf, size_t count, loff_t *pos);
-+	ksu_handle_sys_read(file, buf, count, pos);
++	ksu_handle_vfs_read(&file, &buf, &count, &pos);
 +#endif
- 		return -EBADF;
+ 		return -EINVAL;
 --- a/fs/stat.c
 +++ b/fs/stat.c
 @@ -169,2 +169,6 @@
