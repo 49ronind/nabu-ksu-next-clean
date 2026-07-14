@@ -70,7 +70,7 @@ jobs:
           rm -rf kernel/drivers/kernelsu
 
           cp -a ksu-next/kernel/. kernel/drivers/kernelsu/
-          cp -a ksu-next/kernel/uapi/. kernel/include/uapi/
+          cp -a ksu-next/kernel/include/uapi/. kernel/include/uapi/
 
           test -f kernel/drivers/kernelsu/Kbuild
           test -f kernel/drivers/kernelsu/Kconfig
