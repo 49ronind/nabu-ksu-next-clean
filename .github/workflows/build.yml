@@ -1,0 +1,65 @@
+name: Build Nabu HyperOS KernelSU-Next
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-14 lld-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev bc patch curl
+
+      - name: Clone Mahiro Kernel (KernelSU Branch)
+        run: |
+          git clone --depth=1 --branch KernelSU https://github.com/utziacre/android_kernel_xiaomi_nabu.git kernel
+
+      - name: Inject KernelSU-Next (Legacy Branch)
+        run: |
+          cd kernel
+          # Remove any existing KSU driver remnants
+          rm -rf drivers/kernelsu
+          # Use the official setup script to pull the latest legacy branch with full git history
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+
+      - name: Apply Claude's Manual Hooks Patch
+        run: |
+          cd kernel
+          patch -p1 < ../manual-hooks.patch
+
+      - name: Generate Nabu Defconfig with KSU Flags
+        run: |
+          cd kernel
+          # Append KSU and Manual Hook requirements directly to the configuration
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/nabu_defconfig
+          echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/nabu_defconfig
+          
+          make ARCH=arm64 CC=clang-14 LD=ld.lld-14 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            O=out nabu_defconfig
+
+      - name: Compile Kernel
+        run: |
+          cd kernel
+          make ARCH=arm64 CC=clang-14 LD=ld.lld-14 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            O=out -j$(nproc) Image
+
+      - name: Compress Image
+        run: |
+          cd kernel
+          gzip -c out/arch/arm64/boot/Image > ../Image.gz
+
+      - name: Upload Image.gz Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-KSU-Next-Legacy
+          path: Image.gz
