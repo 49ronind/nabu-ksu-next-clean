@@ -83,13 +83,13 @@ jobs:
           open_hook = "#ifdef CONFIG_KSU\n\textern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
           inject_scoped("fs/open.c", "faccessat(", "unsigned int lookup_flags", open_hook)
 
-          # 3. fs/read_write.c - VFS layer intercept hook
+          # 3. fs/read_write.c - VFS memory read channel vector
           rw_hook = "#ifdef CONFIG_KSU\n\tksu_handle_vfs_read(&file, &buf, &count, &pos);\n#endif"
           inject_scoped("fs/read_write.c", "vfs_read(", "if (!(file->f_mode & FMODE_CAN_READ))", rw_hook, mode="before")
 
           # 4. fs/stat.c - System level file condition diagnostic vector
           stat_hook = "#ifdef CONFIG_KSU\n\textern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);\n\tksu_handle_stat(&dfd, &filename, &flags);\n#endif"
-          inject_scoped("fs/stat.c", "vfs_statx(", "int stat_flags = 0;", stat_hook)
+          inject_scoped("fs/stat.c", "vfs_statx(", "struct path path;", stat_hook)
 
           # 5. kernel/reboot.c - Framework entry call mapping
           reboot_decl = "#ifdef CONFIG_KSU\nextern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\n#endif"
@@ -101,7 +101,7 @@ jobs:
 
           # 7. drivers/input/input.c - Driver communication subsystem patch
           input_hook = "#ifdef CONFIG_KSU\n\textern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n\tksu_handle_input_handle_event(&type, &code, &value);\n#endif"
-          inject_scoped("drivers/input/input.c", "input_handle_event(", "disposition = input_get_disposition", input_hook)
+          inject_scoped("drivers/input/input.c", "input_handle_event(", "input_get_disposition", input_hook)
           '
 
       - name: Hardcode KernelSU Version Code (33189)
@@ -124,6 +124,7 @@ jobs:
 
       - name: Compile Kernel
         run: |
+          run: |
           cd kernel
           make ARCH=arm64 CC=clang-14 LD=ld.lld-14 \
             CROSS_COMPILE=aarch64-linux-gnu- \
