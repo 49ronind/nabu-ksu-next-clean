@@ -1,6 +1,6 @@
-name: Build Nabu HyperOS KernelSU-Next
+name: Build Nabu KernelSU Next
 
-on:
+'on':
   workflow_dispatch:
 
 jobs:
@@ -8,26 +8,25 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            clang-14 \
-            lld-14 \
-            llvm-14 \
-            gcc-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabi \
-            libssl-dev \
             bc \
             bison \
+            build-essential \
+            clang-14 \
             flex \
-            libelf-dev \
-            patch \
-            curl \
+            gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi \
             git \
+            libelf-dev \
+            libssl-dev \
+            lld-14 \
+            llvm-14 \
             python3
 
           sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
@@ -36,150 +35,75 @@ jobs:
           sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
           sudo ln -sf /usr/bin/llvm-strip-14 /usr/bin/llvm-strip
 
-      - name: Clone Mahiro Kernel
-        run: |
-          git clone --depth=1 --branch KernelSU \
-            https://github.com/utziacre/android_kernel_xiaomi_nabu.git kernel
+          clang-14 --version
+          ld.lld-14 --version
 
-      - name: Inject KernelSU-Next v3.2.0 Legacy
+      - name: Clone Nabu kernel
+        run: |
+          git clone --depth=1 \
+            --branch KernelSU \
+            https://github.com/utziacre/android_kernel_xiaomi_nabu.git \
+            kernel
+
+          cd kernel
+          echo "Kernel commit:"
+          git rev-parse HEAD
+
+      - name: Clone KernelSU Next Legacy
+        run: |
+          git clone --depth=1 \
+            --branch legacy \
+            https://github.com/KernelSU-Next/KernelSU-Next.git \
+            ksu-next
+
+          cd ksu-next
+          git fetch --tags
+          git checkout v3.2.0-legacy
+
+          echo "KernelSU Next commit:"
+          git rev-parse HEAD
+
+      - name: Install KernelSU Next
+        run: |
+          set -e
+
+          rm -rf kernel/drivers/kernelsu
+
+          cp -a ksu-next/kernel/. kernel/drivers/kernelsu/
+          cp -a ksu-next/kernel/uapi/. kernel/include/uapi/
+
+          test -f kernel/drivers/kernelsu/Kbuild
+          test -f kernel/drivers/kernelsu/Kconfig
+          test -f kernel/include/uapi/app_profile.h
+
+          echo "KernelSU Next source installed"
+          echo "KernelSU UAPI header installed"
+
+      - name: Apply KernelSU manual hooks
+        run: |
+          test -f scripts/inject_ksu_hooks.py
+          python3 scripts/inject_ksu_hooks.py kernel
+
+      - name: Set KernelSU version
         run: |
           set -e
           cd kernel
 
-          rm -rf drivers/kernelsu
-
-          git clone --depth=1 --branch legacy \
-            https://github.com/KernelSU-Next/KernelSU-Next.git /tmp/ksu-next
-
-          cd /tmp/ksu-next
-          git fetch --tags
-          git checkout v3.2.0-legacy
-
-          cd "$GITHUB_WORKSPACE/kernel"
-
-          cp -a /tmp/ksu-next/kernel/. drivers/kernelsu/
-
-          test -d /tmp/ksu-next/kernel/uapi
-          cp -a /tmp/ksu-next/kernel/uapi/. include/uapi/
-
-          test -f drivers/kernelsu/Kbuild
-          test -f drivers/kernelsu/Kconfig
-          test -f include/uapi/app_profile.h
-
-          echo "KernelSU-Next successfully injected"
-          echo "Found: include/uapi/app_profile.h"
-
-      - name: Inject KernelSU Manual Hooks
-        run: |
-          cd kernel
-
-          python3 - <<'PYTHON'
-          import os
-          import sys
-
-          def inject_scoped(filepath, func_sig, anchor_line, hook_code, mode="after"):
-              if not os.path.exists(filepath):
-                  print("Error: File not found: " + filepath)
-                  sys.exit(1)
-
-              with open(filepath, "r") as f:
-                  lines = f.readlines()
-
-              found_func = False
-              patched = False
-
-              for i, line in enumerate(lines):
-                  if func_sig in line:
-                      found_func = True
-
-                  if found_func and anchor_line in line:
-                      nearby = "".join(lines[max(0, i - 5):i + 5])
-
-                      if "CONFIG_KSU" in nearby:
-                          print("Already contains CONFIG_KSU near: " + filepath)
-                          return
-
-                      if mode == "after":
-                          lines[i] = line + "
-" + hook_code + "
-"
-                      else:
-                          lines[i] = hook_code + "
-" + line
-
-                      patched = True
-                      break
-
-              if not found_func or not patched:
-                  print("Error: Injection target not found: " + filepath)
-                  sys.exit(1)
-
-              with open(filepath, "w") as f:
-                  f.writelines(lines)
-
-              print("Injected: " + filepath)
-
-          exec_hook = """#ifdef CONFIG_KSU
-              extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);
-              ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
-          #endif"""
-
-          open_hook = """#ifdef CONFIG_KSU
-              extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);
-              ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
-          #endif"""
-
-          rw_hook = """#ifdef CONFIG_KSU
-              ksu_handle_vfs_read(&file, &buf, &count, &pos);
-          #endif"""
-
-          stat_hook = """#ifdef CONFIG_KSU
-              extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
-              ksu_handle_stat(&dfd, &filename, &flags);
-          #endif"""
-
-          reboot_decl = """#ifdef CONFIG_KSU
-          extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
-          #endif"""
-
-          reboot_call = """#ifdef CONFIG_KSU
-              {
-                  int ksu_ret = ksu_handle_sys_reboot(magic1, magic2, cmd, (void __user **)&arg);
-                  if (ksu_ret)
-                      return ksu_ret;
-              }
-          #endif"""
-
-          input_hook = """#ifdef CONFIG_KSU
-              extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
-              ksu_handle_input_handle_event(&type, &code, &value);
-          #endif"""
-
-          inject_scoped("fs/exec.c", "do_execveat_common(", "int retval;", exec_hook)
-          inject_scoped("fs/open.c", "faccessat(", "unsigned int lookup_flags", open_hook)
-          inject_scoped("fs/read_write.c", "vfs_read(", "if (!(file->f_mode & FMODE_CAN_READ))", rw_hook, "before")
-          inject_scoped("fs/stat.c", "vfs_statx(", "struct path path;", stat_hook)
-          inject_scoped("kernel/reboot.c", "SYSCALL_DEFINE4(reboot", "SYSCALL_DEFINE4(reboot", reboot_decl, "before")
-          inject_scoped("kernel/reboot.c", "SYSCALL_DEFINE4(reboot", "int ret = 0;", reboot_call)
-          inject_scoped("drivers/input/input.c", "input_handle_event(", "input_get_disposition", input_hook)
-          PYTHON
-
-      - name: Set KernelSU Version
-        run: |
-          cd kernel
-
           sed -i \
-            's/KSU_VERSION_FALLBACK := 1/KSU_VERSION_FALLBACK := 33189/' \
+            's/^KSU_VERSION_FALLBACK := .*/KSU_VERSION_FALLBACK := 33189/' \
             drivers/kernelsu/Kbuild
 
           sed -i \
-            's/KSU_VERSION_TAG_FALLBACK := v0.0.1/KSU_VERSION_TAG_FALLBACK := v3.2.0-legacy/' \
+            's/^KSU_VERSION_TAG_FALLBACK := .*/KSU_VERSION_TAG_FALLBACK := v3.2.0-legacy/' \
             drivers/kernelsu/Kbuild
 
-          grep -E 'KSU_VERSION_(TAG_)?FALLBACK' drivers/kernelsu/Kbuild
+          grep -E \
+            '^(KSU_VERSION_FALLBACK|KSU_VERSION_TAG_FALLBACK) :=' \
+            drivers/kernelsu/Kbuild
 
-      - name: Generate Nabu Defconfig
+      - name: Generate Nabu defconfig
         run: |
+          set -e
           cd kernel
 
           make ARCH=arm64 \
@@ -190,20 +114,37 @@ jobs:
             O=out \
             nabu_defconfig
 
+      - name: Enable KernelSU manual hooks
+        run: |
+          set -e
+          cd kernel
+
           ./scripts/config \
             --file out/.config \
-            --enable KSU \
+            --enable KSU
+
+          ./scripts/config \
+            --file out/.config \
             --enable KSU_MANUAL_HOOK
 
-          make ARCH=arm64 O=out olddefconfig
+          make ARCH=arm64 \
+            CC=clang-14 \
+            LD=ld.lld-14 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            O=out \
+            olddefconfig
 
+          echo "KernelSU configuration:"
           grep '^CONFIG_KSU' out/.config || true
 
           grep -q '^CONFIG_KSU=y$' out/.config
+
           grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' out/.config
 
-      - name: Compile Kernel
+      - name: Build kernel Image
         run: |
+          set -e
           cd kernel
 
           make ARCH=arm64 \
@@ -217,19 +158,26 @@ jobs:
 
           test -s out/arch/arm64/boot/Image
 
-      - name: Compress Kernel Image
+      - name: Create compressed image
         run: |
-          gzip -n -c kernel/out/arch/arm64/boot/Image > Image.gz
+          set -e
+
+          gzip -n -c \
+            kernel/out/arch/arm64/boot/Image \
+            > Image.gz
 
           test -s Image.gz
+
           sha256sum Image.gz > Image.gz.sha256
+
           ls -lh Image.gz Image.gz.sha256
 
-      - name: Upload Kernel Artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Image-KSU-Next-33189
+          name: nabu-kernelsu-next-33189
           path: |
             Image.gz
             Image.gz.sha256
           if-no-files-found: error
+          retention-days: 14
