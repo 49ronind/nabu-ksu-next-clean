@@ -79,6 +79,17 @@ jobs:
           echo "KernelSU Next source installed"
           echo "KernelSU UAPI header installed"
 
+      - name: Patch KernelSU cpumask compatibility
+        run: |
+          set -e
+
+          sed -i \
+            's/current->cpus_allowed/current->cpus_ptr/g' \
+            kernel/drivers/kernelsu/selinux/rules.c
+
+          echo "Patched cpumask references in rules.c"
+          grep -n "cpus_ptr|cpus_allowed" kernel/drivers/kernelsu/selinux/rules.c | head -20 || true
+
       - name: Apply KernelSU manual hooks
         run: |
           test -f scripts/inject_ksu_hooks.py
