@@ -84,11 +84,11 @@ jobs:
           set -e
 
           sed -i \
-            's/current->cpus_allowed/current->cpus_ptr/g' \
+            's/&current->cpus_allowed/current->cpus_ptr/g' \
             kernel/drivers/kernelsu/selinux/rules.c
 
           echo "Patched cpumask references in rules.c"
-          grep -n "cpus_ptr|cpus_allowed" kernel/drivers/kernelsu/selinux/rules.c | head -20 || true
+          grep -n -E 'cpus_allowed|cpus_ptr' kernel/drivers/kernelsu/selinux/rules.c | head -20 || true
 
       - name: Apply KernelSU manual hooks
         run: |
@@ -155,12 +155,6 @@ jobs:
 
           grep -q '^CONFIG_KSU=y$' out/.config
           grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' out/.config
-
-      - name: Inspect task_struct CPU mask fields
-        run: |
-          cd kernel
-          echo "Searching for CPU affinity field names..."
-          grep -RIn -e "cpus_allowed" -e "cpus_mask" -e "cpus_ptr" include kernel | head -100 || true
 
       - name: Build kernel Image
         run: |
