@@ -1,43 +1,68 @@
+diff --git a/fs/exec.c b/fs/exec.c
 --- a/fs/exec.c
 +++ b/fs/exec.c
-@@ -1700,2 +1700,6 @@
+@@ -1700,6 +1700,12 @@ static int do_execveat_common(int fd, struct filename *filename,
+ 	struct linux_binprm *bprm;
  	int retval;
+ 
 +#ifdef CONFIG_KSU
 +	extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);
 +	ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
 +#endif
++
+ 	if (flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH))
+ 		return -EINVAL;
  
+diff --git a/fs/open.c b/fs/open.c
 --- a/fs/open.c
 +++ b/fs/open.c
-@@ -348,2 +348,6 @@
+@@ -348,6 +348,11 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
+ 	int res;
  	unsigned int lookup_flags = LOOKUP_FOLLOW;
+ 
 +#ifdef CONFIG_KSU
 +	extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);
 +	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
 +#endif
++
+ 	if (mode & ~S_IRWXO)	/* Standard bits are legal */
+ 		return -EINVAL;
  
+diff --git a/fs/read_write.c b/fs/read_write.c
 --- a/fs/read_write.c
 +++ b/fs/read_write.c
-@@ -440,2 +440,5 @@
- 	if (!(file->f_mode & FMODE_CAN_READ))
+@@ -435,6 +435,9 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+ 
+ 	if (!(file->f_mode & FMODE_READ))
+ 		return -EBADF;
 +#ifdef CONFIG_KSU
 +	ksu_handle_vfs_read(&file, &buf, &count, &pos);
 +#endif
+ 	if (!(file->f_mode & FMODE_CAN_READ))
  		return -EINVAL;
+ 	if (unlikely(!access_ok(VERIFY_WRITE, buf, count)))
+diff --git a/fs/stat.c b/fs/stat.c
 --- a/fs/stat.c
 +++ b/fs/stat.c
-@@ -169,2 +169,6 @@
+@@ -168,6 +168,11 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
+ 	      struct kstat *stat, u32 request_mask)
+ {
  	int stat_flags = 0;
++
 +#ifdef CONFIG_KSU
 +	extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
 +	ksu_handle_stat(&dfd, &filename, &flags);
 +#endif
  
+ 	if (flags & AT_EMPTY_PATH)
+ 		stat_flags |= AT_STATX_DONT_SYNC;
+diff --git a/kernel/reboot.c b/kernel/reboot.c
 --- a/kernel/reboot.c
 +++ b/kernel/reboot.c
-@@ -279,2 +279,9 @@
+@@ -279,6 +279,10 @@
   * reboot doesn't sync: do that yourself before calling this.
   */
+ 
 +#ifdef CONFIG_KSU
 +extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
 +#endif
@@ -45,21 +70,30 @@
  SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
  		void __user *, arg)
  {
-@@ -285,2 +292,8 @@
+@@ -286,6 +290,13 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
+ 	char buffer[256];
  	int ret = 0;
+ 
 +#ifdef CONFIG_KSU
 +	{
 +		int ret = ksu_handle_sys_reboot(magic1, magic2, cmd, (void __user **)&arg);
 +		if (ret) return ret;
 +	}
 +#endif
- 
---- a/drivers/input/input.c
++
+ 	/* We only trust the superuser with rebooting the system. */
+ 	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
+ 		return -EPERM;
+diff --git a/drivers/input/input.c b/drivers/input/input.c
+--- b/drivers/input/input.c
 +++ b/drivers/input/input.c
-@@ -369,2 +369,6 @@
+@@ -369,6 +369,11 @@ static void input_handle_event(struct input_dev *dev,
+ 			       unsigned int type, unsigned int code, int value)
  {
- #ifdef CONFIG_KSU
+ 	int disposition = input_get_disposition(dev, type, code, &value);
++#ifdef CONFIG_KSU
 +	extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
 +	ksu_handle_input_handle_event(&type, &code, &value);
 +#endif
- 	int disposition = input_get_disposition(dev, type, code, &value);
+ 
+ 	if ((disposition & INPUT_PASS_TO_DEVICE) && dev->setkeycode) {
