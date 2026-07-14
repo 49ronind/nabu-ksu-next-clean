@@ -14,21 +14,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            bc \
-            bison \
-            build-essential \
-            clang-14 \
-            flex \
-            gcc-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabi \
-            git \
-            libelf-dev \
-            libssl-dev \
-            lld-14 \
-            llvm-14 \
-            patch \
-            python3
+          sudo apt-get install -y             bc             bison             build-essential             clang-14             flex             gcc-aarch64-linux-gnu             gcc-arm-linux-gnueabi             git             libelf-dev             libssl-dev             lld-14             llvm-14             python3
 
           sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
           sudo ln -sf /usr/bin/llvm-nm-14 /usr/bin/llvm-nm
@@ -41,10 +27,7 @@ jobs:
 
       - name: Clone Nabu kernel
         run: |
-          git clone --depth=1 \
-            --branch KernelSU \
-            https://github.com/utziacre/android_kernel_xiaomi_nabu.git \
-            kernel
+          git clone --depth=1             --branch KernelSU             https://github.com/utziacre/android_kernel_xiaomi_nabu.git             kernel
 
           cd kernel
           echo "Kernel commit:"
@@ -52,10 +35,7 @@ jobs:
 
       - name: Clone KernelSU Next Legacy
         run: |
-          git clone --depth=1 \
-            --branch legacy \
-            https://github.com/KernelSU-Next/KernelSU-Next.git \
-            ksu-next
+          git clone --depth=1             --branch legacy             https://github.com/KernelSU-Next/KernelSU-Next.git             ksu-next
 
           cd ksu-next
           git fetch --tags
@@ -83,74 +63,15 @@ jobs:
       - name: Patch KernelSU cpumask compatibility
         run: |
           set -e
-
-          sed -i \
-            's/&current->cpus_allowed/current->cpus_ptr/g' \
-            kernel/drivers/kernelsu/selinux/rules.c
-
+          sed -i 's/&current->cpus_allowed/current->cpus_ptr/g' kernel/drivers/kernelsu/selinux/rules.c
           echo "Patched cpumask references in rules.c"
           grep -n -E 'cpus_allowed|cpus_ptr' kernel/drivers/kernelsu/selinux/rules.c | head -20 || true
 
       - name: Backport path_umount
         run: |
           set -e
-          cd kernel
-
-          if grep -q "int path_umount(struct path \\*path, int flags)" fs/namespace.c; then
-            echo "path_umount already present in fs/namespace.c"
-            exit 0
-          fi
-
-          cat > /tmp/0001-backport-path_umount.patch <<'PATCH'
-          diff --git a/fs/namespace.c b/fs/namespace.c
-          --- a/fs/namespace.c
-          +++ b/fs/namespace.c
-          @@ -1696,6 +1696,40 @@ static inline bool may_mandlock(void)
-           }
-           #endif
-           
-          +static int can_umount(const struct path *path, int flags)
-          +{
-          +\tstruct mount *mnt = real_mount(path->mnt);
-          +
-          +\tif (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW))
-          +\t\treturn -EINVAL;
-          +\tif (!may_mount())
-          +\t\treturn -EPERM;
-          +\tif (path->dentry != path->mnt->mnt_root)
-          +\t\treturn -EINVAL;
-          +\tif (!check_mnt(mnt))
-          +\t\treturn -EINVAL;
-          +\tif (mnt->mnt.mnt_flags & MNT_LOCKED)
-          +\t\treturn -EINVAL;
-          +\tif (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))
-          +\t\treturn -EPERM;
-          +\treturn 0;
-          +}
-          +
-          +int path_umount(struct path *path, int flags)
-          +{
-          +\tstruct mount *mnt = real_mount(path->mnt);
-          +\tint ret;
-          +
-          +\tret = can_umount(path, flags);
-          +\tif (!ret)
-          +\t\tret = do_umount(mnt, flags);
-          +
-          +\tdput(path->dentry);
-          +\tmntput_no_expire(mnt);
-          +\treturn ret;
-          +}
-          +
-           /*
-            * Now umount can handle mount points as well as block devices.
-            * This is important for filesystems which use unnamed block devices.
-          PATCH
-
-          patch -p1 < /tmp/0001-backport-path_umount.patch
-
-          echo "Verifying path_umount backport..."
-          grep -n -E 'path_umount|can_umount' fs/namespace.c || true
+          python3 scripts/backport_path_umount.py kernel
+          grep -n -E 'path_umount|can_umount' kernel/fs/namespace.c || true
 
       - name: Apply KernelSU manual hooks
         run: |
@@ -162,55 +83,27 @@ jobs:
           set -e
           cd kernel
 
-          sed -i \
-            's/^KSU_VERSION_FALLBACK := .*/KSU_VERSION_FALLBACK := 33189/' \
-            drivers/kernelsu/Kbuild
-
-          sed -i \
-            's/^KSU_VERSION_TAG_FALLBACK := .*/KSU_VERSION_TAG_FALLBACK := v3.2.0-legacy/' \
-            drivers/kernelsu/Kbuild
-
-          grep -E \
-            '^(KSU_VERSION_FALLBACK|KSU_VERSION_TAG_FALLBACK) :=' \
-            drivers/kernelsu/Kbuild
+          sed -i 's/^KSU_VERSION_FALLBACK := .*/KSU_VERSION_FALLBACK := 33189/' drivers/kernelsu/Kbuild
+          sed -i 's/^KSU_VERSION_TAG_FALLBACK := .*/KSU_VERSION_TAG_FALLBACK := v3.2.0-legacy/' drivers/kernelsu/Kbuild
+          grep -E '^(KSU_VERSION_FALLBACK|KSU_VERSION_TAG_FALLBACK) :=' drivers/kernelsu/Kbuild
 
       - name: Generate Nabu defconfig
         run: |
           set -e
           cd kernel
 
-          make ARCH=arm64 \
-            CC=clang-14 \
-            LD=ld.lld-14 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            O=out \
-            nabu_defconfig
+          make ARCH=arm64             CC=clang-14             LD=ld.lld-14             CROSS_COMPILE=aarch64-linux-gnu-             CROSS_COMPILE_ARM32=arm-linux-gnueabi-             O=out             nabu_defconfig
 
       - name: Enable KernelSU manual hooks
         run: |
           set -e
           cd kernel
 
-          ./scripts/config \
-            --file out/.config \
-            --enable KSU
+          ./scripts/config --file out/.config --enable KSU
+          ./scripts/config --file out/.config --enable KSU_MANUAL_HOOK
+          ./scripts/config --file out/.config --disable KSU_WITH_KPROBES
 
-          ./scripts/config \
-            --file out/.config \
-            --enable KSU_MANUAL_HOOK
-
-          ./scripts/config \
-            --file out/.config \
-            --disable KSU_WITH_KPROBES
-
-          make ARCH=arm64 \
-            CC=clang-14 \
-            LD=ld.lld-14 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            O=out \
-            olddefconfig
+          make ARCH=arm64             CC=clang-14             LD=ld.lld-14             CROSS_COMPILE=aarch64-linux-gnu-             CROSS_COMPILE_ARM32=arm-linux-gnueabi-             O=out             olddefconfig
 
           echo "KernelSU configuration:"
           grep -E '^CONFIG_KSU|^# CONFIG_KSU_WITH_KPROBES' out/.config || true
@@ -223,29 +116,16 @@ jobs:
           set -e
           cd kernel
 
-          make ARCH=arm64 \
-            CC=clang-14 \
-            LD=ld.lld-14 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            O=out \
-            -j"$(nproc)" \
-            Image
+          make ARCH=arm64             CC=clang-14             LD=ld.lld-14             CROSS_COMPILE=aarch64-linux-gnu-             CROSS_COMPILE_ARM32=arm-linux-gnueabi-             O=out             -j"$(nproc)"             Image
 
           test -s out/arch/arm64/boot/Image
 
       - name: Create compressed image
         run: |
           set -e
-
-          gzip -n -c \
-            kernel/out/arch/arm64/boot/Image \
-            > Image.gz
-
+          gzip -n -c kernel/out/arch/arm64/boot/Image > Image.gz
           test -s Image.gz
-
           sha256sum Image.gz > Image.gz.sha256
-
           ls -lh Image.gz Image.gz.sha256
 
       - name: Upload artifact
