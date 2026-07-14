@@ -37,37 +37,90 @@ jobs:
           cd -
           cp -r /tmp/ksu-next/kernel drivers/kernelsu
 
-      - name: Programmatically Inject KernelSU v3.2.0 Manual Hooks
+      - name: Programmatically Inject KernelSU Manual Hooks via Scoped Python Engine
         run: |
           cd kernel
           python3 -c '
           import os
+
           def inject_scoped(filepath, func_sig, anchor_line, hook_code, mode="after"):
-              with open(filepath, "r") as f: lines = f.readlines()
+              if not os.path.exists(filepath):
+                  print(f"[-] Error: File {filepath} not found!")
+                  exit(1)
+              with open(filepath, "r") as f:
+                  lines = f.readlines()
+              
+              found_func = False
+              patched = False
+              
               for i, line in enumerate(lines):
-                  if func_sig in line and anchor_line in line:
-                      if "CONFIG_KSU" in "".join(lines[max(0, i-5):i+5]): return
-                      lines[i] = (line + "\n" + hook_code + "\n") if mode == "after" else (hook_code + "\n" + line)
-                      with open(filepath, "w") as f: f.writelines(lines)
-                      return
-          
-          # Inject hooks
-          inject_scoped("fs/exec.c", "do_execveat_common", "int retval;", "#ifdef CONFIG_KSU\n\textern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\n\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\n#endif")
-          inject_scoped("fs/open.c", "faccessat", "unsigned int lookup_flags", "#ifdef CONFIG_KSU\n\textern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif")
-          inject_scoped("fs/read_write.c", "vfs_read", "if (!(file->f_mode & FMODE_CAN_READ))", "#ifdef CONFIG_KSU\n\tksu_handle_vfs_read(&file, &buf, &count, &pos);\n#endif", mode="before")
-          inject_scoped("fs/stat.c", "vfs_statx", "struct path path;", "#ifdef CONFIG_KSU\n\textern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);\n\tksu_handle_stat(&dfd, &filename, &flags);\n#endif", mode="before")
-          inject_scoped("kernel/reboot.c", "SYSCALL_DEFINE4(reboot", "SYSCALL_DEFINE4(reboot", "#ifdef CONFIG_KSU\nextern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\n#endif", mode="before")
-          inject_scoped("kernel/reboot.c", "SYSCALL_DEFINE4(reboot", "int ret = 0;", "#ifdef CONFIG_KSU\n\t{\n\t\tint ksu_ret = ksu_handle_sys_reboot(magic1, magic2, cmd, (void __user **)&arg);\n\t\tif (ksu_ret) return ksu_ret;\n\t}\n#endif")
-          inject_scoped("drivers/input/input.c", "input_handle_event", "disposition = input_get_disposition", "#ifdef CONFIG_KSU\n\textern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n\tksu_handle_input_handle_event(&type, &code, &value);\n#endif")
+                  if func_sig in line:
+                      found_func = True
+                  if found_func and anchor_line in line:
+                      if "CONFIG_KSU" in "".join(lines[max(0, i-5):i+5]):
+                          print(f"[!] Notice: Hooks already verified inside scope of {filepath}")
+                          return
+                      if mode == "after":
+                          lines[i] = line + "\n" + hook_code + "\n"
+                      else:
+                          lines[i] = hook_code + "\n" + line
+                      patched = True
+                      break
+                      
+              if not found_func or not patched:
+                  print(f"[-] Error: Target signature loop matching failed in {filepath}!")
+                  exit(1)
+                  
+              with open(filepath, "w") as f:
+                  f.writelines(lines)
+              print(f"[+] Successfully verified and injected scope: {filepath}")
+
+          # 1. fs/exec.c - Process control intercept vector
+          exec_hook = "#ifdef CONFIG_KSU\n\textern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\n\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\n#endif"
+          inject_scoped("fs/exec.c", "do_execveat_common(", "int retval;", exec_hook)
+
+          # 2. fs/open.c - Access authentication check vector
+          open_hook = "#ifdef CONFIG_KSU\n\textern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
+          inject_scoped("fs/open.c", "faccessat(", "unsigned int lookup_flags", open_hook)
+
+          # 3. fs/read_write.c - VFS memory read channel vector
+          rw_hook = "#ifdef CONFIG_KSU\n\tksu_handle_vfs_read(&file, &buf, &count, &pos);\n#endif"
+          inject_scoped("fs/read_write.c", "vfs_read(", "if (!(file->f_mode & FMODE_CAN_READ))", rw_hook, mode="before")
+
+          # 4. fs/stat.c - System level file condition diagnostic vector
+          stat_hook = "#ifdef CONFIG_KSU\n\textern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);\n\tksu_handle_stat(&dfd, &filename, &flags);\n#endif"
+          inject_scoped("fs/stat.c", "vfs_statx(", "struct path path;", stat_hook)
+
+          # 5. kernel/reboot.c - Framework entry call mapping
+          reboot_decl = "#ifdef CONFIG_KSU\nextern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\n#endif"
+          inject_scoped("kernel/reboot.c", "SYSCALL_DEFINE4(reboot", "SYSCALL_DEFINE4(reboot", reboot_decl, mode="before")
+
+          # 6. kernel/reboot.c - Functional supercall core execution routing
+          reboot_call = "#ifdef CONFIG_KSU\n\t{\n\t\tint ksu_ret = ksu_handle_sys_reboot(magic1, magic2, cmd, (void __user **)&arg);\n\t\tif (ksu_ret) return ksu_ret;\n\t}\n#endif"
+          inject_scoped("kernel/reboot.c", "SYSCALL_DEFINE4(reboot", "int ret = 0;", reboot_call)
+
+          # 7. drivers/input/input.c - Driver communication subsystem patch
+          input_hook = "#ifdef CONFIG_KSU\n\textern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n\tksu_handle_input_handle_event(&type, &code, &value);\n#endif"
+          inject_scoped("drivers/input/input.c", "input_handle_event(", "input_get_disposition", input_hook)
           '
 
-      - name: Hardcode KernelSU Version and Fix Recursive Paths
+      - name: Hardcode KernelSU Version Code (33189)
         run: |
           cd kernel
           sed -i "s/KSU_VERSION_FALLBACK := 1/KSU_VERSION_FALLBACK := 33189/" drivers/kernelsu/Kbuild
           sed -i "s/KSU_VERSION_TAG_FALLBACK := v0.0.1/KSU_VERSION_TAG_FALLBACK := v3.2.0-legacy/" drivers/kernelsu/Kbuild
-          # FACTUAL FIX: Use subdir-ccflags-y to recursively propagate include path
-          echo 'subdir-ccflags-y += -I$(srctree)/drivers/kernelsu' >> drivers/kernelsu/Kbuild
+
+      - name: Generate Nabu Defconfig
+        run: |
+          cd kernel
+          make ARCH=arm64 CC=clang-14 LD=ld.lld-14 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            O=out nabu_defconfig
+            
+          # Force enable KSU options AFTER defconfig generation just to be absolutely safe
+          echo "CONFIG_KSU=y" >> out/.config
+          echo "CONFIG_KSU_MANUAL_HOOK=y" >> out/.config
 
       - name: Compile Kernel
         run: |
@@ -75,16 +128,15 @@ jobs:
           make ARCH=arm64 CC=clang-14 LD=ld.lld-14 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            O=out nabu_defconfig
-          echo "CONFIG_KSU=y" >> out/.config
-          echo "CONFIG_KSU_MANUAL_HOOK=y" >> out/.config
-          make ARCH=arm64 CC=clang-14 LD=ld.lld-14 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             O=out -j$(nproc) Image
 
-      - name: Upload Artifact
+      - name: Compress Image
+        run: |
+          cd kernel
+          gzip -c out/arch/arm64/boot/Image > ../Image.gz
+
+      - name: Upload Image.gz Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Image-KSU-Next-33189
-          path: kernel/out/arch/arm64/boot/Image
+          path: Image.gz
