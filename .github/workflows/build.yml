@@ -26,81 +26,25 @@ jobs:
         run: |
           git clone --depth=1 --branch KernelSU https://github.com/utziacre/android_kernel_xiaomi_nabu.git kernel
 
-      - name: Inject KernelSU-Next v3.1.0-legacy
+      - name: Inject KernelSU-Next v3.2.0-legacy
         run: |
           cd kernel
           rm -rf drivers/kernelsu
           git clone --depth=1 --branch legacy https://github.com/KernelSU-Next/KernelSU-Next.git /tmp/ksu-next
           cd /tmp/ksu-next
           git fetch --tags
-          git checkout v3.1.0-legacy
+          git checkout v3.2.0-legacy
           cd -
           cp -r /tmp/ksu-next/kernel drivers/kernelsu
 
-      - name: Programmatically Inject KernelSU v3.1.0 Manual Hooks via Scoped Python Engine
+      - name: Hardcode KernelSU Version and Fix Recursive Subdirectory Paths
         run: |
           cd kernel
-          python3 -c '
-          import os
-
-          def inject_scoped(filepath, func_sig, anchor_line, hook_code, mode="after"):
-              if not os.path.exists(filepath):
-                  print(f"[-] Error: File {filepath} not found!")
-                  exit(1)
-              with open(filepath, "r") as f:
-                  lines = f.readlines()
-              
-              found_func = False
-              patched = False
-              
-              for i, line in enumerate(lines):
-                  if func_sig in line:
-                      found_func = True
-                  if found_func and anchor_line in line:
-                      if "CONFIG_KSU" in "".join(lines[max(0, i-5):i+5]):
-                          print(f"[!] Notice: Hooks already verified inside scope of {filepath}")
-                          return
-                      if mode == "after":
-                          lines[i] = line + "\n" + hook_code + "\n"
-                      else:
-                          lines[i] = hook_code + "\n" + line
-                      patched = True
-                      break
-                      
-              if not found_func or not patched:
-                  print(f"[-] Error: Target signature loop matching failed in {filepath}!")
-                  exit(1)
-                  
-              with open(filepath, "w") as f:
-                  f.writelines(lines)
-              print(f"[+] Successfully verified and injected scope: {filepath}")
-
-          # 1. kernel/sys.c - Root tracking privilege vector (Classic setresuid hook)
-          sys_hook = "#ifdef CONFIG_KSU\n\textern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\n\tksu_handle_setresuid(ruid, euid, suid);\n#endif"
-          inject_scoped("kernel/sys.c", "SYSCALL_DEFINE3(setresuid", "struct user_namespace *ns = current_user_ns();", sys_hook, mode="before")
-
-          # 2. fs/stat.c - Diagnostic status vector
-          stat_hook = "#ifdef CONFIG_KSU\n\textern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);\n\tksu_handle_stat(&dfd, &filename, &flags);\n#endif"
-          inject_scoped("fs/stat.c", "vfs_statx(", "struct path path;", stat_hook, mode="before")
-
-          # 3. kernel/reboot.c - Framework entry call declaration
-          reboot_decl = "#ifdef CONFIG_KSU\nextern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\n#endif"
-          inject_scoped("kernel/reboot.c", "SYSCALL_DEFINE4(reboot", "SYSCALL_DEFINE4(reboot", reboot_decl, mode="before")
-
-          # 4. kernel/reboot.c - Framework operational call routing execution
-          reboot_call = "#ifdef CONFIG_KSU\n\t{\n\t\tint ret = ksu_handle_sys_reboot(magic1, magic2, cmd, (void __user **)&arg);\n\t\tif (ret) return ret;\n\t}\n#endif"
-          inject_scoped("kernel/reboot.c", "SYSCALL_DEFINE4(reboot", "if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))", reboot_call, mode="before")
-
-          # 5. drivers/input/input.c - Input subsystem monitoring vector
-          input_hook = "#ifdef CONFIG_KSU\n\textern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n\tksu_handle_input_handle_event(&type, &code, &value);\n#endif"
-          inject_scoped("drivers/input/input.c", "input_handle_event(", "disposition = input_get_disposition", input_hook, mode="after")
-          '
-
-      - name: Hardcode KernelSU Version Code (33024)
-        run: |
-          cd kernel
-          sed -i "s/KSU_VERSION_FALLBACK := 1/KSU_VERSION_FALLBACK := 33024/" drivers/kernelsu/Kbuild
-          sed -i "s/KSU_VERSION_TAG_FALLBACK := v0.0.1/KSU_VERSION_TAG_FALLBACK := v3.1.0-legacy/" drivers/kernelsu/Kbuild
+          sed -i "s/KSU_VERSION_FALLBACK := 1/KSU_VERSION_FALLBACK := 33189/" drivers/kernelsu/Kbuild
+          sed -i "s/KSU_VERSION_TAG_FALLBACK := v0.0.1/KSU_VERSION_TAG_FALLBACK := v3.2.0-legacy/" drivers/kernelsu/Kbuild
+          
+          # Factual Documentation Fix: Propagate include path recursively to all KSU subdirectories
+          echo 'subdir-ccflags-y += -I$(srctree)/drivers/kernelsu' >> drivers/kernelsu/Kbuild
 
       - name: Generate Nabu Defconfig
         run: |
@@ -130,5 +74,5 @@ jobs:
       - name: Upload Image.gz Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Image-KSU-Next-33024
+          name: Image-KSU-Next-33189
           path: Image.gz
