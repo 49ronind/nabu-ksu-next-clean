@@ -1,6 +1,6 @@
 name: Build Nabu HyperOS KernelSU-Next
 
-on:
+'on':
   workflow_dispatch:
 
 permissions:
