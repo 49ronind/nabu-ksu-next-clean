@@ -59,7 +59,7 @@
 +++ b/drivers/input/input.c
 @@ -369,2 +369,6 @@
  {
-+#ifdef CONFIG_KSU
+ #ifdef CONFIG_KSU
 +	extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
 +	ksu_handle_input_handle_event(&type, &code, &value);
 +#endif
