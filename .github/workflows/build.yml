@@ -156,6 +156,12 @@ jobs:
           grep -q '^CONFIG_KSU=y$' out/.config
           grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' out/.config
 
+      - name: Inspect path_umount backport
+        run: |
+          cd kernel
+          echo "Searching for path_umount and can_umount..."
+          grep -RIn -e "path_umount(" -e "can_umount(" fs/namespace.c fs/internal.h || true
+
       - name: Build kernel Image
         run: |
           set -e
