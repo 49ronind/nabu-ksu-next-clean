@@ -104,11 +104,14 @@ jobs:
           inject_scoped("drivers/input/input.c", "input_handle_event(", "input_get_disposition", input_hook)
           '
 
-      - name: Hardcode KernelSU Version Code (33189)
+      - name: Hardcode KernelSU Version and Fix Out-of-Tree Paths
         run: |
           cd kernel
           sed -i "s/KSU_VERSION_FALLBACK := 1/KSU_VERSION_FALLBACK := 33189/" drivers/kernelsu/Kbuild
           sed -i "s/KSU_VERSION_TAG_FALLBACK := v0.0.1/KSU_VERSION_TAG_FALLBACK := v3.2.0-legacy/" drivers/kernelsu/Kbuild
+          
+          # Factual Fix: Force Kbuild flag to map header compilation requests to the physical source directory
+          echo 'ccflags-y += -I$(srctree)/drivers/kernelsu' >> drivers/kernelsu/Kbuild
 
       - name: Generate Nabu Defconfig
         run: |
@@ -128,7 +131,6 @@ jobs:
           make ARCH=arm64 CC=clang-14 LD=ld.lld-14 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            KCFLAGS="-I$GITHUB_WORKSPACE/kernel/drivers/kernelsu" \
             O=out -j$(nproc) Image
 
       - name: Compress Image
