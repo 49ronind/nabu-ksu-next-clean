@@ -127,6 +127,10 @@ jobs:
             --file out/.config \
             --enable KSU_MANUAL_HOOK
 
+          ./scripts/config \
+            --file out/.config \
+            --disable KSU_WITH_KPROBES
+
           make ARCH=arm64 \
             CC=clang-14 \
             LD=ld.lld-14 \
@@ -136,11 +140,16 @@ jobs:
             olddefconfig
 
           echo "KernelSU configuration:"
-          grep '^CONFIG_KSU' out/.config || true
+          grep -E '^CONFIG_KSU|^# CONFIG_KSU_WITH_KPROBES' out/.config || true
 
           grep -q '^CONFIG_KSU=y$' out/.config
-
           grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' out/.config
+
+      - name: Inspect task_struct CPU mask fields
+        run: |
+          cd kernel
+          echo "Searching for CPU affinity field names..."
+          grep -RIn "cpus_allowed|cpus_mask|cpus_ptr" include kernel | head -100 || true
 
       - name: Build kernel Image
         run: |
