@@ -149,7 +149,7 @@ extern int ksu_handle_sys_reboot(
 
     inject_hook(kernel_dir, "fs/exec.c", "do_execveat_common(", "int retval;", exec_hook, "ksu_handle_execveat", "after")
     inject_hook(kernel_dir, "fs/open.c", "faccessat(", "unsigned int lookup_flags", open_hook, "ksu_handle_faccessat", "after")
-    inject_hook(kernel_dir, "fs/read_write.c", "vfs_read(", "if (!(file->f_mode & FMODE_CAN_READ))", read_hook, "ksu_handle_vfs_read", "before")
+    inject_hook(kernel_dir, "fs/read_write.c", "vfs_read(", "if (!(file->f_mode & FMODE_READ))", read_hook, "ksu_handle_vfs_read", "before")
     inject_hook(kernel_dir, "fs/stat.c", "vfs_statx(", "struct path path;", stat_hook, "ksu_handle_stat", "after")
     inject_hook(kernel_dir, "kernel/reboot.c", "SYSCALL_DEFINE4(reboot", "SYSCALL_DEFINE4(reboot", reboot_declaration, "ksu_handle_sys_reboot", "before")
     inject_hook(kernel_dir, "kernel/reboot.c", "SYSCALL_DEFINE4(reboot", "int ret = 0;", reboot_hook, "int ksu_ret = ksu_handle_sys_reboot", "after")
