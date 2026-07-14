@@ -27,6 +27,7 @@ jobs:
             libssl-dev \
             lld-14 \
             llvm-14 \
+            patch \
             python3
 
           sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
@@ -90,11 +91,66 @@ jobs:
           echo "Patched cpumask references in rules.c"
           grep -n -E 'cpus_allowed|cpus_ptr' kernel/drivers/kernelsu/selinux/rules.c | head -20 || true
 
-      - name: Inspect path_umount backport
+      - name: Backport path_umount
         run: |
+          set -e
           cd kernel
-          echo "Searching for path_umount and can_umount..."
-          grep -RIn -e "path_umount(" -e "can_umount(" fs/namespace.c fs/internal.h || true
+
+          if grep -q "int path_umount(struct path \\*path, int flags)" fs/namespace.c; then
+            echo "path_umount already present in fs/namespace.c"
+            exit 0
+          fi
+
+          cat > /tmp/0001-backport-path_umount.patch <<'PATCH'
+          diff --git a/fs/namespace.c b/fs/namespace.c
+          --- a/fs/namespace.c
+          +++ b/fs/namespace.c
+          @@ -1696,6 +1696,40 @@ static inline bool may_mandlock(void)
+           }
+           #endif
+           
+          +static int can_umount(const struct path *path, int flags)
+          +{
+          +\tstruct mount *mnt = real_mount(path->mnt);
+          +
+          +\tif (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW))
+          +\t\treturn -EINVAL;
+          +\tif (!may_mount())
+          +\t\treturn -EPERM;
+          +\tif (path->dentry != path->mnt->mnt_root)
+          +\t\treturn -EINVAL;
+          +\tif (!check_mnt(mnt))
+          +\t\treturn -EINVAL;
+          +\tif (mnt->mnt.mnt_flags & MNT_LOCKED)
+          +\t\treturn -EINVAL;
+          +\tif (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))
+          +\t\treturn -EPERM;
+          +\treturn 0;
+          +}
+          +
+          +int path_umount(struct path *path, int flags)
+          +{
+          +\tstruct mount *mnt = real_mount(path->mnt);
+          +\tint ret;
+          +
+          +\tret = can_umount(path, flags);
+          +\tif (!ret)
+          +\t\tret = do_umount(mnt, flags);
+          +
+          +\tdput(path->dentry);
+          +\tmntput_no_expire(mnt);
+          +\treturn ret;
+          +}
+          +
+           /*
+            * Now umount can handle mount points as well as block devices.
+            * This is important for filesystems which use unnamed block devices.
+          PATCH
+
+          patch -p1 < /tmp/0001-backport-path_umount.patch
+
+          echo "Verifying path_umount backport..."
+          grep -n -E 'path_umount|can_umount' fs/namespace.c || true
 
       - name: Apply KernelSU manual hooks
         run: |
