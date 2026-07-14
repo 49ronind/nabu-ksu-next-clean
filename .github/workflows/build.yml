@@ -149,7 +149,7 @@ jobs:
         run: |
           cd kernel
           echo "Searching for CPU affinity field names..."
-          grep -RIn "cpus_allowed|cpus_mask|cpus_ptr" include kernel | head -100 || true
+          grep -RIn -e "cpus_allowed" -e "cpus_mask" -e "cpus_ptr" include kernel | head -100 || true
 
       - name: Build kernel Image
         run: |
