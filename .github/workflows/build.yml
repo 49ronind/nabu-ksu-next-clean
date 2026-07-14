@@ -124,7 +124,6 @@ jobs:
 
       - name: Compile Kernel
         run: |
-          run: |
           cd kernel
           make ARCH=arm64 CC=clang-14 LD=ld.lld-14 \
             CROSS_COMPILE=aarch64-linux-gnu- \
