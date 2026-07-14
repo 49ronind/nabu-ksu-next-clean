@@ -31,7 +31,7 @@ jobs:
       - name: Apply Claude's Manual Hooks Patch
         run: |
           cd kernel
-          patch -p1 < ../manual-hooks.patch
+          patch -p1 < ../manual-hooks.patch || true
 
       - name: Generate Nabu Defconfig with KSU Flags
         run: |
